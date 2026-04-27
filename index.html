@@ -51,7 +51,6 @@ html,body{height:100%;overflow:hidden;background:#060606;font-family:-apple-syst
 .chart-inner{flex:1;position:relative;min-height:0}
 .delta-up{font-size:10px;font-weight:700;color:#22D3A5;background:rgba(34,211,165,0.1);border-radius:4px;padding:2px 5px}
 .delta-dn{font-size:10px;font-weight:700;color:#F43F5E;background:rgba(244,63,94,0.1);border-radius:4px;padding:2px 5px}
-/* Picker */
 .picker-btn{display:flex;align-items:center;gap:7px;background:#0d0d0d;border:1px solid #141414;border-radius:10px;padding:7px 12px;cursor:pointer;color:#F1F5F9;font-size:11px;font-weight:500;transition:all 0.15s}
 .picker-btn:hover{border-color:#1e1e1e}
 .picker-dropdown{position:absolute;right:0;top:calc(100% + 6px);background:#0a0a0a;border:1px solid #1e1e1e;border-radius:12px;padding:14px;z-index:999;display:flex;gap:14px;box-shadow:0 20px 60px rgba(0,0,0,0.9)}
@@ -61,23 +60,40 @@ html,body{height:100%;overflow:hidden;background:#060606;font-family:-apple-syst
 </head>
 <body>
 <div id="app">Loading...</div>
-
 <script>
-// ── CONFIG ─────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════
+// COLUMN MAP — UPDATE THESE TO MATCH YOUR GOOGLE SHEET HEADERS
+// Open DevTools Console after first load to see: "CSV Headers: [...]"
+// Then update each value below to match exactly.
+// ══════════════════════════════════════════════════════════════════
+const COL = {
+  date:         "Date (Formatted)",          // The date column — MUST be YYYY-MM-DD format
+  cash:         "Total Cash Collected (Today)",
+  callsBooked:  "Calls Booked",
+  closed:       "Total Amount Closed",
+  shows:        "Calls That Showed Up (Today)",
+  calendar:     "Calls On Calendar (Today)",
+  outbounds:    "Outbound Messages Sent",
+  convos:       "Total Conversations Had",
+  followups:    "Follow-Ups",
+  hours:        "Hours Worked",
+  pitched:      "Calls Pitched",
+  inbounds:     "Inbound Conversations",
+  qualified:    "Qualified Calls Booked",
+};
+// ══════════════════════════════════════════════════════════════════
+
 const CLIENTS = [{
   slug:"Josh Agsibit", name:"Josh Agsibit",
   csvUrl:"https://docs.google.com/spreadsheets/d/e/2PACX-1vQEWlOWfzQguE23VT1DKzKrf33uQ6LJv1Iy3nTGp_vD6LaaCh3X86BzCviUmjZY4r0M0023fQ0AYyay/pub?gid=2056152482&single=true&output=csv",
   monthlyTarget:100000,
 }];
-// ──────────────────────────────────────────────────────
 
 const TODAY=new Date();
-const dateKey="Date (Formatted)";
 const MONTHS=["January","February","March","April","May","June","July","August","September","October","November","December"];
 const SM=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const fmt$=v=>Number(v||0).toLocaleString("en-US",{style:"currency",currency:"USD",minimumFractionDigits:0});
 const fmtN=v=>Number(v||0).toLocaleString();
-
 function addDays(d,n){const r=new Date(d);r.setDate(r.getDate()+n);return r;}
 function addMonths(d,n){const r=new Date(d);r.setMonth(r.getMonth()+n);return r;}
 function sameDay(a,b){return a&&b&&a.toDateString()===b.toDateString();}
@@ -114,70 +130,72 @@ let chart=null;
 function getSlug(){return window.location.pathname.replace(/\//g,"").toLowerCase()||"client";}
 function getClient(){return CLIENTS.find(c=>c.slug===getSlug())||CLIENTS[0];}
 
-// ── DATE PARSING (YYYY-MM-DD only, no timezone issues) ──
-function parseFormattedDate(str) {
+// ── DATE PARSING ───────────────────────────────────────
+// Handles: YYYY-MM-DD (ideal), M/D/YYYY, MM/DD/YYYY
+function parseDate(str) {
   if (!str) return null;
-  const parts = String(str).trim().split("-");
-  if (parts.length === 3) {
-    const y = parseInt(parts[0], 10);
-    const m = parseInt(parts[1], 10) - 1;
-    const d = parseInt(parts[2], 10);
-    if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
-      return new Date(y, m, d);
-    }
-  }
-  const fallback = new Date(str);
+  const s = String(str).trim();
+
+  // YYYY-MM-DD
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return new Date(+iso[1], +iso[2]-1, +iso[3]);
+
+  // M/D/YYYY or MM/DD/YYYY
+  const us = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (us) return new Date(+us[3], +us[1]-1, +us[2]);
+
+  // Fallback — avoid timezone shift
+  const fallback = new Date(s);
   return isNaN(fallback) ? null : fallback;
 }
 
-// ── CSV FILTERING (uses Date Formatted column ONLY) ────
+// ── CSV FILTERING ──────────────────────────────────────
 function filterData(rows){
   const s=S.start, e=S.end||S.start;
   const s0=new Date(s.getFullYear(),s.getMonth(),s.getDate());
   const e0=new Date(e.getFullYear(),e.getMonth(),e.getDate(),23,59,59);
 
   const f=rows.filter(r=>{
-    const dateStr = r[dateKey];
-    const d = parseFormattedDate(dateStr);
+    const d = parseDate(r[COL.date]);
     return d && d >= s0 && d <= e0;
   });
 
-  const g=k=>f.reduce((a,r)=>a+(parseFloat(r[k])||0),0);
+  const g=key=>f.reduce((a,r)=>a+(parseFloat(r[key])||0),0);
 
   const bd={};
   f.forEach(r=>{
-    const d = parseFormattedDate(r[dateKey]);
+    const d = parseDate(r[COL.date]);
     if(!d) return;
-    const sortKey = r[dateKey];
+    const sortKey = r[COL.date];
     const lbl=SM[d.getMonth()]+" "+d.getDate();
-    if(!bd[sortKey])bd[sortKey]={sortKey:sortKey, label:lbl, cash:0, calls:0, closes:0, outbounds:0, convos:0, pitched:0, shows:0};
-    bd[sortKey].cash+=parseFloat(r["Total Cash Collected (Today)"])||0;
-    bd[sortKey].calls+=parseFloat(r["Calls Booked"])||0;
-    bd[sortKey].closes+=parseFloat(r["Total Amount Closed"])||0;
-    bd[sortKey].outbounds+=parseFloat(r["Outbound Messages Sent"])||0;
-    bd[sortKey].convos+=parseFloat(r["Total Conversations Had"])||0;
-    bd[sortKey].pitched+=parseFloat(r["Calls Pitched"])||0;
-    bd[sortKey].shows+=parseFloat(r["Calls That Showed Up (Today)"])||0;
+    if(!bd[sortKey])bd[sortKey]={sortKey, label:lbl, cash:0, calls:0, closes:0, outbounds:0, convos:0, pitched:0, shows:0};
+    bd[sortKey].cash    += parseFloat(r[COL.cash])      ||0;
+    bd[sortKey].calls   += parseFloat(r[COL.callsBooked])||0;
+    bd[sortKey].closes  += parseFloat(r[COL.closed])    ||0;
+    bd[sortKey].outbounds+=parseFloat(r[COL.outbounds]) ||0;
+    bd[sortKey].convos  += parseFloat(r[COL.convos])    ||0;
+    bd[sortKey].pitched += parseFloat(r[COL.pitched])   ||0;
+    bd[sortKey].shows   += parseFloat(r[COL.shows])     ||0;
   });
 
   const chartData = Object.values(bd).sort((a,b) => a.sortKey.localeCompare(b.sortKey));
 
   return {
     totals:{
-      cash:g("Total Cash Collected (Today)"),
-      calls:g("Calls Booked"),
-      closes:g("Total Amount Closed"),
-      shows:g("Calls That Showed Up (Today)"),
-      calendar:g("Calls On Calendar (Today)"),
-      outbounds:g("Outbound Messages Sent"),
-      convos:g("Total Conversations Had"),
-      followups:g("Follow-Ups"),
-      hours:g("Hours Worked"),
-      pitched:g("Calls Pitched"),
-      inbounds:g("Inbound Conversations"),
-      qualified:g("Qualified Calls Booked")
+      cash:      g(COL.cash),
+      calls:     g(COL.callsBooked),
+      closes:    g(COL.closed),
+      shows:     g(COL.shows),
+      calendar:  g(COL.calendar),
+      outbounds: g(COL.outbounds),
+      convos:    g(COL.convos),
+      followups: g(COL.followups),
+      hours:     g(COL.hours),
+      pitched:   g(COL.pitched),
+      inbounds:  g(COL.inbounds),
+      qualified: g(COL.qualified),
     },
-    chartData: chartData
+    chartData
   };
 }
 
@@ -192,89 +210,83 @@ function goalHTML(){
   const day=TODAY.getDate(),dim=new Date(TODAY.getFullYear(),TODAY.getMonth()+1,0).getDate();
   const proj=day>0?Math.round((t.cash/day)*dim):0;
   return `<div class="goal"><div class="goal-accent"></div>
-    <div class="goal-top">
-      <div>
-        <div class="goal-label">${MONTHS[TODAY.getMonth()]} Target <button class="edit-btn" onclick="editGoal()">Edit</button></div>
-        <div><span class="goal-amount">${fmt$(t.cash)}</span><span class="goal-of">/ ${fmt$(goal)}</span></div>
-      </div>
-      <div style="text-align:right">
-        <div class="goal-pct">${pct.toFixed(0)}%</div>
-        <div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px">of target</div>
-      </div>
-    </div>
-    <div class="goal-bar-bg"><div class="goal-bar" style="width:${pct}%"></div></div>
-    <div class="goal-footer">
-      <span><span style="color:#888;font-weight:600">${fmt$(goal-t.cash)}</span> remaining</span>
-      <span>Projected: <span style="color:${proj>=goal?"#22D3A5":"#F97316"};font-weight:700">${fmt$(proj)}</span></span>
-    </div>
-  </div>`;
+<div class="goal-top">
+<div>
+<div class="goal-label">${MONTHS[TODAY.getMonth()]} Target <button class="edit-btn" onclick="editGoal()">Edit</button></div>
+<div><span class="goal-amount">${fmt$(t.cash)}</span><span class="goal-of">/ ${fmt$(goal)}</span></div>
+</div>
+<div style="text-align:right">
+<div class="goal-pct">${pct.toFixed(0)}%</div>
+<div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:1px">of target</div>
+</div>
+</div>
+<div class="goal-bar-bg"><div class="goal-bar" style="width:${pct}%"></div></div>
+<div class="goal-footer">
+<span><span style="color:#888;font-weight:600">${fmt$(goal-t.cash)}</span> remaining</span>
+<span>Projected: <span style="color:${proj>=goal?"#22D3A5":"#F97316"};font-weight:700">${fmt$(proj)}</span></span>
+</div>
+</div>`;
 }
 
 function sl(name){return `<div class="sl"><span>${name}</span><hr></div>`;}
 
 function chartHTML(title,legend){
   return `<div class="chart-wrap">
-    <div class="chart-header">
-      <div class="chart-title">${title}</div>
-      <div class="chart-legend">${legend}</div>
-    </div>
-    <div class="chart-inner"><canvas id="chart"></canvas></div>
-  </div>`;
+<div class="chart-header">
+<div class="chart-title">${title}</div>
+<div class="chart-legend">${legend}</div>
+</div>
+<div class="chart-inner"><canvas id="chart"></canvas></div>
+</div>`;
 }
 
 function renderOverview(){
   const t=DATA.totals;
-  // Show Rate = showed up / on calendar
-  // Close Rate = closes / showed up
-  // AOV = cash / closes
   const sr = t.calendar > 0 ? ((t.shows / t.calendar) * 100).toFixed(1) : null;
   const cr = t.shows > 0 ? ((t.closes / t.shows) * 100).toFixed(1) : null;
   const aov = t.closes > 0 ? Math.round(t.cash / t.closes) : null;
-
   return `<div class="content">
-    ${goalHTML()}
-    <div class="row">
-      ${card("Calls Booked (Qualified)",fmtN(t.qualified),"")}
-      ${card("Show Rate",sr!=null?sr+"%":"—","")}
-      ${card("Close Rate",cr!=null?cr+"%":"—","")}
-      ${card("Avg Order Value",aov!=null?fmt$(aov):"—","")}
-    </div>
-    ${chartHTML("Performance Overview",`
-      <div class="li"><div class="ld" style="background:#F97316"></div>Cash</div>
-      <div class="li"><div class="ld" style="background:#888"></div>Closes</div>
-      <div class="li"><div class="ld" style="background:#444"></div>Shows</div>`)}
-  </div>`;
+${goalHTML()}
+<div class="row">
+${card("Calls Booked (Qualified)",fmtN(t.qualified),"")}
+${card("Show Rate",sr!=null?sr+"%":"—","")}
+${card("Close Rate",cr!=null?cr+"%":"—","")}
+${card("Avg Order Value",aov!=null?fmt$(aov):"—","")}
+</div>
+${chartHTML("Performance Overview",`
+<div class="li"><div class="ld" style="background:#F97316"></div>Cash</div>
+<div class="li"><div class="ld" style="background:#888"></div>Closes</div>
+<div class="li"><div class="ld" style="background:#444"></div>Shows</div>`)}
+</div>`;
 }
 
 function renderActivity(){
   const t=DATA.totals;
   const ctb=t.convos>0?((t.calls/t.convos)*100).toFixed(1):"0.0";
-  const ptb=t.pitched>0?((t.calls/t.pitched)*100).toFixed(1):"0.0";
-  const sr=t.calendar>0?((t.shows/t.calendar)*100).toFixed(1):null;
   return `<div class="content">
-    ${sl("Outreach")}
-    <div class="row">
-      ${card("Outbounds",fmtN(t.outbounds),"")}
-      ${card("Follow-Ups",fmtN(t.followups),"")}
-      ${card("Conversations",fmtN(t.convos),"")}
-    </div>
-    ${sl("Calls")}
-    <div class="row">
-      ${card("Calls Pitched",fmtN(t.pitched),"")}
-      ${card("Calls Booked",fmtN(t.calls),"")}
-      ${card("Calls Booked (Qualified)",fmtN(t.qualified),"")}
-    </div>
-    ${sl("Other")}
-    <div class="row">
-      ${card("Inbounds",fmtN(t.inbounds),"")}
-      ${card("Convo to Book Rate",ctb+"%","")}
-      ${card("Hours Worked",fmtN(t.hours),"")}
-    </div>
-    ${chartHTML("Activity Breakdown",`
-      <div class="li"><div class="ld" style="background:#F97316"></div>Outbounds</div>
-      <div class="li"><div class="ld" style="background:#888"></div>Convos</div>
-      <div class="li"><div class="ld" style="background:#444"></div>Pitched</div>`)}
-  </div>`;
+${sl("Outreach")}
+<div class="row">
+${card("Outbounds",fmtN(t.outbounds),"")}
+${card("Follow-Ups",fmtN(t.followups),"")}
+${card("Conversations",fmtN(t.convos),"")}
+</div>
+${sl("Calls")}
+<div class="row">
+${card("Calls Pitched",fmtN(t.pitched),"")}
+${card("Calls Booked",fmtN(t.calls),"")}
+${card("Calls Booked (Qualified)",fmtN(t.qualified),"")}
+</div>
+${sl("Other")}
+<div class="row">
+${card("Inbounds",fmtN(t.inbounds),"")}
+${card("Convo to Book Rate",ctb+"%","")}
+${card("Hours Worked",fmtN(t.hours),"")}
+</div>
+${chartHTML("Activity Breakdown",`
+<div class="li"><div class="ld" style="background:#F97316"></div>Outbounds</div>
+<div class="li"><div class="ld" style="background:#888"></div>Convos</div>
+<div class="li"><div class="ld" style="background:#444"></div>Pitched</div>`)}
+</div>`;
 }
 
 // ── CHART ──────────────────────────────────────────────
@@ -331,74 +343,50 @@ function miniCal(){
     const inR=ss&&eff&&d>(ss<eff?ss:eff)&&d<(ss<eff?eff:ss);
     const sel=isSt||isEn;
     cells+=`<button data-day="${i}" data-month="${mo}" data-year="${yr}" ${future?"disabled":""}
-      style="background:${sel?"#F1F5F9":inR?"#1e1e1e":"none"};color:${sel?"#000":future?"#2a2a2a":inR?"#999":sameDay(d,TODAY)?"#F97316":"#888"};border:none;border-radius:5px;padding:5px 0;font-size:11px;cursor:${future?"default":"pointer"};font-weight:${sel?"800":"400"}">${i}</button>`;
+style="background:${sel?"#F1F5F9":inR?"#1e1e1e":"none"};color:${sel?"#000":future?"#2a2a2a":inR?"#999":sameDay(d,TODAY)?"#F97316":"#888"};border:none;border-radius:5px;padding:5px 0;font-size:11px;cursor:${future?"default":"pointer"};font-weight:${sel?"800":"400"}">${i}</button>`;
   }
   return `<div style="width:210px">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <button data-action="prev-month" style="background:#141414;border:none;color:#666;cursor:pointer;font-size:16px;padding:3px 8px;border-radius:5px">&lt;</button>
-      <span style="font-size:12px;color:#F1F5F9;font-weight:700">${MONTHS[mo]} ${yr}</span>
-      <button data-action="next-month" style="background:${canNext?"#141414":"transparent"};border:none;color:${canNext?"#666":"#222"};cursor:${canNext?"pointer":"default"};font-size:16px;padding:3px 8px;border-radius:5px">&gt;</button>
-    </div>
-    <div style="display:grid;grid-template-columns:repeat(7,1fr);margin-bottom:4px">
-      ${["Mo","Tu","We","Th","Fr","Sa","Su"].map(d=>`<div style="text-align:center;font-size:9px;color:#444;font-weight:700">${d}</div>`).join("")}
-    </div>
-    <div id="cal-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px 0">${cells}</div>
-  </div>`;
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+<button data-action="prev-month" style="background:#141414;border:none;color:#666;cursor:pointer;font-size:16px;padding:3px 8px;border-radius:5px">&lt;</button>
+<span style="font-size:12px;color:#F1F5F9;font-weight:700">${MONTHS[mo]} ${yr}</span>
+<button data-action="next-month" style="background:${canNext?"#141414":"transparent"};border:none;color:${canNext?"#666":"#222"};cursor:${canNext?"pointer":"default"};font-size:16px;padding:3px 8px;border-radius:5px">&gt;</button>
+</div>
+<div style="display:grid;grid-template-columns:repeat(7,1fr);margin-bottom:4px">
+${["Mo","Tu","We","Th","Fr","Sa","Su"].map(d=>`<div style="text-align:center;font-size:9px;color:#444;font-weight:700">${d}</div>`).join("")}
+</div>
+<div id="cal-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px 0">${cells}</div>
+</div>`;
 }
 
 function pickerHTML(){
   const active=PRESETS.find(p=>presetActive(p,S.start,S.end));
   const label=active||getRangeLabel(S.start,S.end);
   return `<div style="position:relative">
-    <button data-action="toggle-picker" class="picker-btn">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-      <span style="color:${active?"#F97316":"#F1F5F9"}">${label}</span>
-      <svg width="9" height="9" viewBox="0 0 10 10" fill="none" style="transform:${S.pickerOpen?"rotate(180deg)":"none"};transition:0.2s"><path d="M2 3.5L5 6.5L8 3.5" stroke="#444" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    </button>
-    ${S.pickerOpen?`<div class="picker-dropdown" id="picker-dropdown">
-      <div style="display:flex;flex-direction:column;gap:1px;border-right:1px solid #141414;padding-right:14px">
-        ${PRESETS.map(p=>`<button data-preset="${p}" class="preset-btn${presetActive(p,S.start,S.end)?" active":""}">${p}</button>`).join("")}
-      </div>
-      <div>
-        <div style="font-size:9px;color:#444;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Select Dates</div>
-        ${miniCal()}
-      </div>
-    </div>`:""}
-  </div>`;
+<button data-action="toggle-picker" class="picker-btn">
+<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+<span style="color:${active?"#F97316":"#F1F5F9"}">${label}</span>
+<svg width="9" height="9" viewBox="0 0 10 10" fill="none" style="transform:${S.pickerOpen?"rotate(180deg)":"none"};transition:0.2s"><path d="M2 3.5L5 6.5L8 3.5" stroke="#444" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+</button>
+${S.pickerOpen?`<div class="picker-dropdown" id="picker-dropdown">
+<div style="display:flex;flex-direction:column;gap:1px;border-right:1px solid #141414;padding-right:14px">
+${PRESETS.map(p=>`<button data-preset="${p}" class="preset-btn${presetActive(p,S.start,S.end)?" active":""}">${p}</button>`).join("")}
+</div>
+<div>
+<div style="font-size:9px;color:#444;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Select Dates</div>
+${miniCal()}
+</div>
+</div>`:""}
+</div>`;
 }
 
 // ── EVENT DELEGATION ──────────────────────────────────
 var _pickerJustClicked = false;
-
 document.addEventListener("click",function(e){
-  // Toggle picker
-  if(e.target.closest("[data-action='toggle-picker']")){
-    e.preventDefault();e.stopPropagation();
-    S.pickerOpen=!S.pickerOpen;
-    if(S.pickerOpen){S.pickerSelecting="start";}
-    render();return;
-  }
-  // Prev month
-  if(e.target.closest("[data-action='prev-month']")){
-    e.preventDefault();e.stopPropagation();
-    S.viewDate=addMonths(S.viewDate,-1);render();return;
-  }
-  // Next month
-  if(e.target.closest("[data-action='next-month']")){
-    e.preventDefault();e.stopPropagation();
-    if(addMonths(S.viewDate,1)<=TODAY){S.viewDate=addMonths(S.viewDate,1);render();}
-    return;
-  }
-  // Preset buttons
+  if(e.target.closest("[data-action='toggle-picker']")){e.preventDefault();e.stopPropagation();S.pickerOpen=!S.pickerOpen;if(S.pickerOpen){S.pickerSelecting="start";}render();return;}
+  if(e.target.closest("[data-action='prev-month']")){e.preventDefault();e.stopPropagation();S.viewDate=addMonths(S.viewDate,-1);render();return;}
+  if(e.target.closest("[data-action='next-month']")){e.preventDefault();e.stopPropagation();if(addMonths(S.viewDate,1)<=TODAY){S.viewDate=addMonths(S.viewDate,1);render();}return;}
   var presetBtn=e.target.closest("[data-preset]");
-  if(presetBtn){
-    e.preventDefault();e.stopPropagation();
-    var l=presetBtn.getAttribute("data-preset");
-    var p=getPreset(l);
-    if(p){S.start=p.start;S.end=p.end;S.pickerOpen=false;S.pickerSelecting="start";render();}
-    return;
-  }
-  // Calendar day buttons
+  if(presetBtn){e.preventDefault();e.stopPropagation();var l=presetBtn.getAttribute("data-preset");var p=getPreset(l);if(p){S.start=p.start;S.end=p.end;S.pickerOpen=false;S.pickerSelecting="start";render();}return;}
   var dayBtn=e.target.closest("[data-day]");
   if(dayBtn&&!dayBtn.disabled){
     e.preventDefault();e.stopPropagation();
@@ -406,30 +394,14 @@ document.addEventListener("click",function(e){
     var mo=parseInt(dayBtn.getAttribute("data-month"));
     var day=parseInt(dayBtn.getAttribute("data-day"));
     var d=new Date(yr,mo,day);
-    if(S.pickerSelecting==="start"){
-      S.start=d;S.end=null;S.pickerSelecting="end";S.pickerHover=null;
-      _pickerJustClicked=true;
-      setTimeout(function(){_pickerJustClicked=false;},200);
-      render();
-    } else {
-      var s=S.start;
-      if(sameDay(s,d)){S.start=d;S.end=d;}
-      else {S.start=s<=d?s:d;S.end=s<=d?d:s;}
-      S.pickerSelecting="start";
-      S.pickerOpen=false;
-      render();
-    }
+    if(S.pickerSelecting==="start"){S.start=d;S.end=null;S.pickerSelecting="end";S.pickerHover=null;_pickerJustClicked=true;setTimeout(function(){_pickerJustClicked=false;},200);render();}
+    else{var s=S.start;if(sameDay(s,d)){S.start=d;S.end=d;}else{S.start=s<=d?s:d;S.end=s<=d?d:s;}S.pickerSelecting="start";S.pickerOpen=false;render();}
     return;
   }
-  // Inside dropdown but not on a button
   if(e.target.closest("#picker-dropdown")){return;}
-  // Close picker when clicking outside
-  if(S.pickerOpen&&!_pickerJustClicked){
-    S.pickerOpen=false;S.pickerSelecting="start";render();
-  }
+  if(S.pickerOpen&&!_pickerJustClicked){S.pickerOpen=false;S.pickerSelecting="start";render();}
 });
 
-// Hover: update visuals without full re-render
 document.addEventListener("mouseover",function(e){
   if(!S.pickerOpen||S.pickerSelecting!=="end")return;
   var dayBtn=e.target.closest("[data-day]");
@@ -464,38 +436,32 @@ function render(){
   const cn=S.clientName||getClient()?.name||"Client";
   const content=S.page==="overview"?renderOverview():renderActivity();
   document.getElementById("app").innerHTML=`
-    <div class="header">
-      <div>
-        <div class="title">Sales Dashboard</div>
-        <div class="subtitle">Shufu Studio &times;
-          ${S.editingClient
-            ?`<input id="cin" style="background:none;border:none;border-bottom:1px solid #333;color:#666;font-size:10px;letter-spacing:2.5px;text-transform:uppercase;font-weight:600;outline:none;width:120px" value="${cn}" onblur="saveClient()" onkeydown="if(event.key==='Enter')saveClient()">`
-            :`<span class="client-name" onclick="startEdit()">${cn}</span>`}
-        </div>
-      </div>
-      ${pickerHTML()}
-    </div>
-    <div class="tabs">
-      <button class="tab ${S.page==="overview"?"active":""}" onclick="setPage('overview')">Overview</button>
-      <button class="tab ${S.page==="activity"?"active":""}" onclick="setPage('activity')">Activity</button>
-    </div>
-    ${content}`;
+<div class="header">
+<div>
+<div class="title">Sales Dashboard</div>
+<div class="subtitle">Shufu Studio &times;
+${S.editingClient
+  ?`<input id="cin" style="background:none;border:none;border-bottom:1px solid #333;color:#666;font-size:10px;letter-spacing:2.5px;text-transform:uppercase;font-weight:600;outline:none;width:120px" value="${cn}" onblur="saveClient()" onkeydown="if(event.key==='Enter')saveClient()">`
+  :`<span class="client-name" onclick="startEdit()">${cn}</span>`}
+</div>
+</div>
+${pickerHTML()}
+</div>
+<div class="tabs">
+<button class="tab ${S.page==="overview"?"active":""}" onclick="setPage('overview')">Overview</button>
+<button class="tab ${S.page==="activity"?"active":""}" onclick="setPage('activity')">Activity</button>
+</div>
+${content}`;
   setTimeout(drawChart,30);
   if(S.editingClient){const i=document.getElementById("cin");if(i){i.focus();i.select();}}
 }
 
 function setPage(p){S.page=p;render();}
 
-// Goal editing with localStorage persistence
 function editGoal(){
   const v=prompt("New monthly target ($):",S.goal);
-  if(v&&parseInt(v)>0){
-    S.goal=parseInt(v);
-    try{localStorage.setItem("goal-"+getClient().slug,String(S.goal));}catch(e){}
-    render();
-  }
+  if(v&&parseInt(v)>0){S.goal=parseInt(v);try{localStorage.setItem("goal-"+getClient().slug,String(S.goal));}catch(e){}render();}
 }
-
 function startEdit(){S.editingClient=true;render();}
 function saveClient(){const i=document.getElementById("cin");if(i&&i.value.trim())S.clientName=i.value.trim();S.editingClient=false;render();}
 
@@ -503,17 +469,46 @@ function saveClient(){const i=document.getElementById("cin");if(i&&i.value.trim(
 function init(){
   const client=getClient();
   if(!client){document.getElementById("app").innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#333">Client not found</div>';return;}
-  // Load saved goal from localStorage, fall back to config default
   try{const g=localStorage.getItem("goal-"+client.slug);S.goal=g?parseInt(g):client.monthlyTarget;}catch(e){S.goal=client.monthlyTarget;}
   S.clientName=client.name;
   render();
-  Papa.parse(client.csvUrl,{
-    download:true,header:true,skipEmptyLines:true,
-    complete:r=>{RAW=r.data;DATA=filterData(RAW);render();},
-    error:()=>{}
+
+  Papa.parse(client.csvUrl, {
+    download: true,
+    header: true,
+    skipEmptyLines: true,
+    complete: function(results) {
+      RAW = results.data;
+
+      // ── DIAGNOSTIC: open DevTools Console to see your actual column names
+      if (RAW.length > 0) {
+        console.log("✅ CSV loaded. Row count:", RAW.length);
+        console.log("📋 CSV Headers:", Object.keys(RAW[0]));
+        console.log("🔍 First row sample:", RAW[0]);
+
+        // Check which COL mappings are missing
+        Object.entries(COL).forEach(([key, colName]) => {
+          if (!(colName in RAW[0])) {
+            console.warn(`⚠️ Column NOT FOUND: COL.${key} = "${colName}"`);
+          } else {
+            console.log(`✅ Column OK: COL.${key} = "${colName}"`);
+          }
+        });
+      } else {
+        console.warn("⚠️ CSV loaded but has 0 rows. Check the sheet URL and gid.");
+      }
+
+      DATA = filterData(RAW);
+      render();
+    },
+    error: function(err) {
+      console.error("❌ PapaParse error:", err);
+    }
   });
-  setInterval(()=>window.location.reload(),60*60*1000);
+
+  setInterval(()=>window.location.reload(), 60*60*1000);
 }
+
 init();
 </script>
 </body>

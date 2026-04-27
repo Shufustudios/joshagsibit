@@ -67,7 +67,7 @@ html,body{height:100%;overflow:hidden;background:#060606;font-family:-apple-syst
 // Then update each value below to match exactly.
 // ══════════════════════════════════════════════════════════════════
 const COL = {
-  date:         "Date (Formatted)",          // The date column — MUST be YYYY-MM-DD format
+  date:         "Today's date",          // The date column — MUST be YYYY-MM-DD format
   cash:         "Total Cash Collected (Today)",
   callsBooked:  "Calls Booked",
   closed:       "Total Amount Closed",
@@ -136,17 +136,15 @@ function parseDate(str) {
   if (!str) return null;
   const s = String(str).trim();
 
+  // DD/MM/YYYY (your sheet format)
+  const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (dmy) return new Date(+dmy[3], +dmy[2]-1, +dmy[1]);
+
   // YYYY-MM-DD
   const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (iso) return new Date(+iso[1], +iso[2]-1, +iso[3]);
 
-  // M/D/YYYY or MM/DD/YYYY
-  const us = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (us) return new Date(+us[3], +us[1]-1, +us[2]);
-
-  // Fallback — avoid timezone shift
-  const fallback = new Date(s);
-  return isNaN(fallback) ? null : fallback;
+  return null;
 }
 
 // ── CSV FILTERING ──────────────────────────────────────
